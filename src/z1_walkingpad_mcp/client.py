@@ -91,8 +91,12 @@ class Z1Treadmill:
 
     @property
     def steps_display(self) -> int | None:
-        """Step count to show: distance-derived estimate once the stride
-        curve is calibrated, raw pad count before that."""
+        """Live step count: relay the pad's counter for responsive updates."""
+        return self.status.steps
+
+    @property
+    def steps_summary(self) -> int | None:
+        """Session step count: use the learned estimate once calibrated."""
         if self.stride.calibrated:
             return round(self._corrected_steps)
         return self.status.steps
@@ -333,14 +337,14 @@ class Z1Treadmill:
         return target
 
     def session_summary(self) -> dict:
-        """Current session metrics: the pad's own counters plus our kcal."""
+        """Current session metrics with the calibrated step estimate when available."""
         duration_s = self.status.elapsed_s
         distance_m = self.status.distance_m
         avg_kmh = round(distance_m / duration_s * 3.6, 2) if duration_s and distance_m else None
         return {
             "duration_s": duration_s,
             "distance_m": distance_m,
-            "steps": self.steps_display,
+            "steps": self.steps_summary,
             "avg_speed_kmh": avg_kmh,
             "calories_kcal": round(self.calories.total_kcal, 1),
             "weight_kg_used": self.calories.weight_kg,
@@ -376,9 +380,17 @@ class Z1Treadmill:
             d_dist = (self.status.distance_m or 0) - (prev.distance_m or 0)
             d_steps = (self.status.steps or 0) - (prev.steps or 0)
             speed = self.status.speed_kmh or 0
-            if speed >= TRUST_SPEED_KMH and d_dist > 0 and d_steps > 0:
-                self.stride.learn(d_dist, d_steps, speed)
-                self._corrected_steps += d_steps
+            if speed >= TRUST_SPEED_KMH:
+                if d_dist > 0 and d_steps > 0:
+                    self.stride.learn(d_dist, d_steps, speed)
+                if d_steps > 0:
+                    # Keep every trusted raw step delta, even when the pad's
+                    # integer-meter distance has not advanced in this frame.
+                    self._corrected_steps += d_steps
+                elif d_dist > 0:
+                    stride = self.stride.stride_for(speed)
+                    if stride:
+                        self._corrected_steps += d_dist / stride
             elif d_dist > 0:
                 stride = self.stride.stride_for(speed)
                 self._corrected_steps += (d_dist / stride) if stride else max(d_steps, 0)

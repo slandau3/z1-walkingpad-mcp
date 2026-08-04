@@ -182,13 +182,12 @@ or on its own schedule — clients display them as-is (pad-as-master).
 
 **Step accuracy note:** the pad's step counter (belt/motor dynamics) is
 unreliable at slow speeds — consumer counters err 20–40% below ~3 km/h
-(Beevi et al.). Both clients therefore display a corrected count: they
-learn the user's personal stride-vs-speed curve while speed ≥ 3 km/h
-(`stride = distance / steps` per 0.5 km/h bucket, persisted), and below
-that derive steps from the mechanically exact belt distance:
-`steps = distance / stride(speed)`. Raw pad steps are shown until the
-curve is calibrated. Distance and elapsed time are always exact and used
-as-is.
+(Beevi et al.). Both clients relay the raw pad step counter for live status so
+the UI stays responsive. Session summaries learn the user's personal
+stride-vs-speed curve while speed ≥ 3 km/h (`stride = distance / steps` per
+0.5 km/h bucket, persisted), and below that derive steps from the mechanically
+exact belt distance: `steps = distance / stride(speed)`. Distance and elapsed
+time are always exact and used as-is.
 
 ## Calories (computed locally)
 
