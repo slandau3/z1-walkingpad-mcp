@@ -43,12 +43,12 @@ shows the current speed (in your chosen unit). Click it for the popover:
 connect/disconnect, big speed readout with − / + steppers, Start/Stop, stats
 (elapsed, distance, steps, estimated kcal), and a Settings section:
 
-The step count is a **self-calibrating estimate**, not the pad's raw number:
-the pad's counter degrades at slow speeds (research: 20–40% error below
-~3 km/h), so the app learns your personal stride-vs-speed curve whenever
-you walk at ≥3 km/h and derives slow-speed steps from the exact belt
-distance. Raw pad steps are shown until the curve is calibrated (a few
-minutes of faster walking).
+The live step count is the pad's **raw counter**, so it updates promptly with
+each telemetry step delta. Session summaries use a self-calibrating estimate
+after the curve is learned: the pad's counter degrades at slow speeds
+(research: 20–40% error below ~3 km/h), so the app learns your personal
+stride-vs-speed curve whenever you walk at ≥3 km/h and derives slow-speed
+steps from the exact belt distance.
 
 - **Units** — Imperial (mph / mi+ft / lb) or Metric (km/h / km / kg); default
   Imperial. Also synced to the pad's own LED display (property 1, bit 0x0002).

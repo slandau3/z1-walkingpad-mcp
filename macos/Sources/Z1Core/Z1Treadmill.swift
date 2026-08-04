@@ -124,12 +124,17 @@ public actor Z1Treadmill {
     private var strideLearner = StrideLearner()
     private var correctedSteps = 0.0
 
-    /// Step count to display: distance-derived estimate once the stride
-    /// curve is calibrated, pad count (with persistStats offsets) before that.
+    /// Live step count: relay the pad's counter so the UI updates on every
+    /// telemetry step delta, even when integer-meter distance is unchanged.
     public var stepsDisplay: Int {
+        displayStat(telemetry.steps, statOffsets.steps)
+    }
+
+    /// Session step count: use the learned distance estimate after calibration.
+    private var correctedStepsDisplay: Int {
         strideLearner.calibrated
             ? Int(correctedSteps.rounded())
-            : displayStat(telemetry.steps, statOffsets.steps)
+            : stepsDisplay
     }
     private var calorieStateRestored = false
     private var lastTargetSpeed: Double?
@@ -425,7 +430,7 @@ public actor Z1Treadmill {
         return SessionSummary(
             durationS: durationS,
             distanceM: distanceM,
-            steps: stepsDisplay,
+            steps: correctedStepsDisplay,
             avgSpeedKmh: avg,
             caloriesKcal: (calorieTracker.totalKcal * 10).rounded() / 10,
             weightKgUsed: calorieTracker.weightKg
@@ -523,9 +528,17 @@ public actor Z1Treadmill {
             let dDist = Double((telemetry.distanceM ?? 0) - (prev.distanceM ?? 0))
             let dSteps = Double((telemetry.steps ?? 0) - (prev.steps ?? 0))
             let speed = telemetry.speedKmh ?? 0
-            if speed >= StrideLearner.trustSpeedKmh, dDist > 0, dSteps > 0 {
-                strideLearner.learn(distanceM: dDist, steps: dSteps, speedKmh: speed)
-                correctedSteps += dSteps
+            if speed >= StrideLearner.trustSpeedKmh {
+                if dDist > 0, dSteps > 0 {
+                    strideLearner.learn(distanceM: dDist, steps: dSteps, speedKmh: speed)
+                }
+                if dSteps > 0 {
+                    // Keep every trusted raw step delta, even when the pad's
+                    // integer-meter distance has not advanced in this frame.
+                    correctedSteps += dSteps
+                } else if dDist > 0, let stride = strideLearner.stride(for: speed) {
+                    correctedSteps += dDist / stride
+                }
             } else if dDist > 0 {
                 if let stride = strideLearner.stride(for: speed) {
                     correctedSteps += dDist / stride
