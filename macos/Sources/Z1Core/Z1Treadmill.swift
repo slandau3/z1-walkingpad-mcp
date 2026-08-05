@@ -121,20 +121,13 @@ public actor Z1Treadmill {
     private var calorieTracker = CalorieTracker()
     private var statOffsets = (elapsed: 0, distance: 0, steps: 0)
     public private(set) var persistStats = false
-    private var strideLearner = StrideLearner()
-    private var correctedSteps = 0.0
 
-    /// Live step count: relay the pad's counter so the UI updates on every
+    /// Step count: relay the pad's counter so the UI updates on every
     /// telemetry step delta, even when integer-meter distance is unchanged.
+    /// The hardware count is canonical — live display and session summary
+    /// alike.
     public var stepsDisplay: Int {
         displayStat(telemetry.steps, statOffsets.steps)
-    }
-
-    /// Session step count: use the learned distance estimate after calibration.
-    private var correctedStepsDisplay: Int {
-        strideLearner.calibrated
-            ? Int(correctedSteps.rounded())
-            : stepsDisplay
     }
     private var calorieStateRestored = false
     private var lastTargetSpeed: Double?
@@ -430,7 +423,7 @@ public actor Z1Treadmill {
         return SessionSummary(
             durationS: durationS,
             distanceM: distanceM,
-            steps: correctedStepsDisplay,
+            steps: stepsDisplay,
             avgSpeedKmh: avg,
             caloriesKcal: (calorieTracker.totalKcal * 10).rounded() / 10,
             weightKgUsed: calorieTracker.weightKg
@@ -453,7 +446,6 @@ public actor Z1Treadmill {
     public func clearStats() {
         statOffsets = (elapsed: 0, distance: 0, steps: 0)
         calorieTracker.reset()
-        correctedSteps = 0
         UserDefaults.standard.removeObject(forKey: Self.calorieStateKey)
         persistCalorieState()
         emitStatus()
@@ -519,32 +511,6 @@ public actor Z1Treadmill {
                 statOffsets.steps += prev.steps ?? 0
             } else {
                 calorieTracker.reset()
-                correctedSteps = 0
-            }
-        } else {
-            // step estimation: trust the pad's count at >= 3 km/h (and learn
-            // the personal stride curve from it); below that, derive steps
-            // from the exact belt distance and the learned stride
-            let dDist = Double((telemetry.distanceM ?? 0) - (prev.distanceM ?? 0))
-            let dSteps = Double((telemetry.steps ?? 0) - (prev.steps ?? 0))
-            let speed = telemetry.speedKmh ?? 0
-            if speed >= StrideLearner.trustSpeedKmh {
-                if dDist > 0, dSteps > 0 {
-                    strideLearner.learn(distanceM: dDist, steps: dSteps, speedKmh: speed)
-                }
-                if dSteps > 0 {
-                    // Keep every trusted raw step delta, even when the pad's
-                    // integer-meter distance has not advanced in this frame.
-                    correctedSteps += dSteps
-                } else if dDist > 0, let stride = strideLearner.stride(for: speed) {
-                    correctedSteps += dDist / stride
-                }
-            } else if dDist > 0 {
-                if let stride = strideLearner.stride(for: speed) {
-                    correctedSteps += dDist / stride
-                } else {
-                    correctedSteps += max(dSteps, 0)
-                }
             }
         }
         if !calorieStateRestored {
@@ -574,7 +540,6 @@ public actor Z1Treadmill {
         UserDefaults.standard.set(
             [
                 "totalKcal": calorieTracker.totalKcal,
-                "correctedSteps": correctedSteps,
                 "elapsedS": telemetry.elapsedS ?? 0,
                 "distanceM": telemetry.distanceM ?? 0,
             ],
@@ -589,16 +554,13 @@ public actor Z1Treadmill {
         let savedElapsed = state["elapsedS"] as? Int ?? 0
         guard curElapsed >= savedElapsed else { return } // pad counters reset (power cycle) — fresh
         calorieTracker.totalKcal = state["totalKcal"] as? Double ?? 0
-        correctedSteps = state["correctedSteps"] as? Double ?? 0
         // credit the gap while we were disconnected, if the belt kept moving
+        // (steps need no gap credit: the pad's counter persists on the pad)
         let gapS = curElapsed - savedElapsed
         let gapD = (telemetry.distanceM ?? 0) - (state["distanceM"] as? Int ?? 0)
         if gapS > 0, gapD > 0 {
             let avgKmh = Double(gapD) / Double(gapS) * 3.6
             calorieTracker.addSample(speedKmh: avgKmh, elapsedS: Double(gapS))
-            if let stride = strideLearner.stride(for: avgKmh) {
-                correctedSteps += Double(gapD) / stride
-            }
         }
     }
 
