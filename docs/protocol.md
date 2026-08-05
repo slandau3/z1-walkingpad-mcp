@@ -180,14 +180,12 @@ under load (walking). Counters persist across BLE connections while the
 pad's session is open, and reset when the pad finalizes a session (Stop)
 or on its own schedule — clients display them as-is (pad-as-master).
 
-**Step accuracy note:** the pad's step counter (belt/motor dynamics) is
-unreliable at slow speeds — consumer counters err 20–40% below ~3 km/h
-(Beevi et al.). Both clients relay the raw pad step counter for live status so
-the UI stays responsive. Session summaries learn the user's personal
-stride-vs-speed curve while speed ≥ 3 km/h (`stride = distance / steps` per
-0.5 km/h bucket, persisted), and below that derive steps from the mechanically
-exact belt distance: `steps = distance / stride(speed)`. Distance and elapsed
-time are always exact and used as-is.
+**Step accuracy note:** the pad's step counter (belt/motor dynamics) is the
+canonical step source. Both clients relay the raw pad step counter exactly as
+reported — for live status, session summaries, persistence, and exports — so
+the UI stays responsive and totals always match the pad. No client-side
+estimation or correction is applied to any step total. Distance and elapsed
+time are likewise exact and used as-is.
 
 ## Calories (computed locally)
 
