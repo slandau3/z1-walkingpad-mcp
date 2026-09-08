@@ -24,7 +24,6 @@ from bleak.backends.device import BLEDevice
 from . import constants as c
 from . import protocol as p
 from .metrics import CalorieTracker
-from .stride import TRUST_SPEED_KMH, StrideLearner
 
 # Calorie integration is client-side, so it survives reconnects via this file:
 # pad counters (elapsed/distance/steps) persist on the pad; we persist the kcal
@@ -86,15 +85,15 @@ class Z1Treadmill:
         self.calories = CalorieTracker()
         self._last_target_speed: float | None = None
         self._calorie_state_restored = False
-        self.stride = StrideLearner()
-        self._corrected_steps = 0.0
 
     @property
     def steps_display(self) -> int | None:
-        """Step count to show: distance-derived estimate once the stride
-        curve is calibrated, raw pad count before that."""
-        if self.stride.calibrated:
-            return round(self._corrected_steps)
+        """Live step count: relay the pad's counter for responsive updates."""
+        return self.status.steps
+
+    @property
+    def steps_summary(self) -> int | None:
+        """Session step count: the pad's hardware counter, same as live."""
         return self.status.steps
 
     # -- callbacks ------------------------------------------------------
@@ -340,7 +339,7 @@ class Z1Treadmill:
         return {
             "duration_s": duration_s,
             "distance_m": distance_m,
-            "steps": self.steps_display,
+            "steps": self.steps_summary,
             "avg_speed_kmh": avg_kmh,
             "calories_kcal": round(self.calories.total_kcal, 1),
             "weight_kg_used": self.calories.weight_kg,
@@ -368,20 +367,6 @@ class Z1Treadmill:
         )
         if regressed:
             self.calories.reset()
-            self._corrected_steps = 0.0
-        else:
-            # step estimation: trust the pad's count at >= 3 km/h (and learn
-            # the personal stride curve from it); below that, derive steps
-            # from the exact belt distance and the learned stride
-            d_dist = (self.status.distance_m or 0) - (prev.distance_m or 0)
-            d_steps = (self.status.steps or 0) - (prev.steps or 0)
-            speed = self.status.speed_kmh or 0
-            if speed >= TRUST_SPEED_KMH and d_dist > 0 and d_steps > 0:
-                self.stride.learn(d_dist, d_steps, speed)
-                self._corrected_steps += d_steps
-            elif d_dist > 0:
-                stride = self.stride.stride_for(speed)
-                self._corrected_steps += (d_dist / stride) if stride else max(d_steps, 0)
         # belt state is derived from the pad (the master): it may have been
         # started/stopped by the physical remote between our commands
         self.belt_running = bool(self.status.speed_kmh and self.status.speed_kmh > 0)
@@ -408,7 +393,6 @@ class Z1Treadmill:
                 json.dumps(
                     {
                         "total_kcal": self.calories.total_kcal,
-                        "corrected_steps": self._corrected_steps,
                         "elapsed_s": self.status.elapsed_s,
                         "distance_m": self.status.distance_m,
                     }
@@ -429,16 +413,13 @@ class Z1Treadmill:
         if cur_elapsed < saved_elapsed:
             return  # pad counters went backwards (power cycle) — start fresh
         self.calories.total_kcal = float(state.get("total_kcal") or 0)
-        self._corrected_steps = float(state.get("corrected_steps") or 0)
         # credit the gap while we were disconnected, if the belt kept moving
+        # (steps need no gap credit: the pad's counter persists on the pad)
         gap_s = cur_elapsed - saved_elapsed
         gap_d = (self.status.distance_m or 0) - (state.get("distance_m") or 0)
         if gap_s > 0 and gap_d > 0:
             avg_kmh = gap_d / gap_s * 3.6
             self.calories.add_sample(avg_kmh, gap_s)
-            stride = self.stride.stride_for(avg_kmh)
-            if stride:
-                self._corrected_steps += gap_d / stride
 
     def _on_machine_status(self, _char, data: bytearray) -> None:
         # belt-state events from the pad itself: works even when no
